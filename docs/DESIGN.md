@@ -4,7 +4,25 @@ The full, editable plan lives in the Claude doc "Starping — Game Design Plan".
 
 ## Pitch
 
-A 60-second space arcade game for phones and browsers, built for players from about 13. Ping to find stars, grab them, escape through the wormhole. One shared daily sector; the first player to bank the golden star names it forever.
+A 60-second space game for phones and browsers, built for players from about 13. Ping to find stars, grab them, escape through the wormhole. One shared daily sector; the first player to bank the golden star names it forever.
+
+## Theme: Mars (current)
+
+The game is shown as a night landing on Mars, with a real-rocketry, mission-control look. The rules below are unchanged; only names and visuals differ.
+
+| Rule name | On screen |
+| --- | --- |
+| Probe | Reusable lander |
+| Ping | Lidar scan |
+| Stars | Ice cores |
+| Golden star | Anomaly; the first pilot to land with it names a crater |
+| Rocks | Boulders |
+| Lurkers | Dust devils |
+| Wormhole | Landing pad |
+| Crates | Cargo pods (planned) |
+| Daily sector | Numbered daily mission |
+
+Mars-theme monetization (later, never selling score): ads between missions, rewarded ads for cosmetics, lander liveries, a Mission Pass subscription, real embroidered mission patches, and crater certificates.
 
 ## Core loop
 
