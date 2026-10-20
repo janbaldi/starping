@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#03040a">
+<title>Starping</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one full-screen vector "cabinet" canvas; HTML panels float over it for the menus. Single dark arcade look. */
+:root{
+  --void:#03040a;
+  --phosphor:#7df9ff;
+  --star:#ffe66d;
+  --danger:#ff4d6d;
+  --worm:#c77dff;
+  --ink:#d8f6ff;
+  --dim:#5c7a85;
+  --display:"Major Mono Display", "Courier New", monospace;
+  --ui:"IBM Plex Mono", ui-monospace, "Courier New", monospace;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0;background:var(--void);color:var(--ink);overflow:hidden;font-family:var(--ui);}
+body{touch-action:none;-webkit-user-select:none;user-select:none;}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;}
+.panel{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));
+  background:radial-gradient(ellipse at center, rgba(3,4,10,.55), rgba(3,4,10,.9));overflow-y:auto;}
+.card{width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px;text-align:center;}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(40px,12vw,56px);margin:0;color:var(--phosphor);
+  text-shadow:0 0 8px var(--phosphor),0 0 22px rgba(125,249,255,.5);letter-spacing:.02em;}
+h2{font-family:var(--display);font-weight:400;font-size:30px;margin:0;color:var(--phosphor);text-shadow:0 0 10px var(--phosphor);}
+.sector{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);}
+.rules{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;text-align:left;font-size:14px;line-height:1.35;margin:0 auto;}
+.rules b{color:var(--phosphor);font-weight:600;letter-spacing:.08em;}
+.board{border-top:1px solid rgba(125,249,255,.25);border-bottom:1px solid rgba(125,249,255,.25);padding:10px 0;}
+.board h3{margin:0 0 8px;font-size:11px;letter-spacing:.24em;color:var(--dim);font-weight:600;}
+.board ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-variant-numeric:tabular-nums;}
+.board li{display:grid;grid-template-columns:2ch 4ch 1fr;gap:10px;font-size:15px;}
+.board li span:last-child{text-align:right;}
+.board li.me{color:var(--star);}
+.board .empty{font-size:13px;color:var(--dim);}
+.golden{font-size:13px;color:var(--star);}
+.row{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;}
+label{font-size:12px;letter-spacing:.2em;color:var(--dim);}
+input#initials{width:5.2ch;font:600 26px var(--ui);text-align:center;text-transform:uppercase;letter-spacing:.25em;
+  background:transparent;color:var(--star);border:1px solid rgba(255,230,109,.5);border-radius:4px;padding:4px 0 4px .25em;}
+input#initials:focus-visible{outline:2px solid var(--star);outline-offset:2px;}
+button{font:600 16px var(--ui);letter-spacing:.18em;color:var(--void);background:var(--phosphor);border:0;border-radius:4px;
+  padding:14px 18px;cursor:pointer;box-shadow:0 0 16px rgba(125,249,255,.55);}
+button.ghost{background:transparent;color:var(--phosphor);border:1px solid rgba(125,249,255,.5);box-shadow:none;font-size:13px;padding:10px 14px;}
+button:focus-visible{outline:2px solid var(--ink);outline-offset:3px;}
+.big{font-family:var(--display);font-size:64px;color:var(--star);text-shadow:0 0 14px rgba(255,230,109,.6);line-height:1;font-variant-numeric:tabular-nums;}
+.note{font-size:13px;color:var(--dim);line-height:1.4;}
+.msg{font-size:15px;line-height:1.4;}
+.share{font-size:13px;color:var(--ink);background:rgba(125,249,255,.06);border:1px dashed rgba(125,249,255,.35);padding:8px;border-radius:4px;word-break:break-word;-webkit-user-select:text;user-select:text;}
+.err{color:var(--danger);font-size:12px;min-height:1em;}
+@media (prefers-reduced-motion:reduce){h1,h2{text-shadow:none;}}
+</style>
+</head>
+<body>
+
+<canvas id="cv" aria-label="Starping game screen"></canvas>
+
+<div class="panel" id="title">
+  <div class="card">
+    <div class="sector" id="sectorLabel">Sector #001</div>
+    <h1>starping</h1>
+    <div class="rules">
+      <b>HOLD</b><span>steer toward your thumb</span>
+      <b>TAP</b><span>ping: see what hides in the dark</span>
+      <b>GRAB</b><span>stars, then dive into the wormhole</span>
+      <b>AVOID</b><span>rocks and lurkers that wake when pinged</span>
+    </div>
+    <div class="golden" id="goldenTitle"></div>
+    <div class="board"><h3>TODAY'S TOP PILOTS</h3><ol id="boardTitle"><li class="empty">Loading…</li></ol></div>
+    <div class="row">
+      <label for="initials">YOUR INITIALS</label>
+      <input id="initials" maxlength="3" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text" value="">
+    </div>
+    <div class="err" id="initErr"></div>
+    <button id="startBtn">INSERT COIN</button>
+    <div class="note">Laptop: mouse to steer, click or space to ping. Same sector for everyone today; your best run counts.</div>
+  </div>
+</div>
+
+<div class="panel" id="over" hidden>
+  <div class="card">
+    <h2 id="overTitle">escaped!</h2>
+    <div class="msg" id="overMsg"></div>
+    <div class="big" id="overScore">0</div>
+    <div class="note" id="overBest"></div>
+    <div class="golden" id="overGolden"></div>
+    <div class="board"><h3>TODAY'S TOP PILOTS</h3><ol id="boardOver"></ol></div>
+    <div class="share" id="shareText"></div>
+    <div class="row">
+      <button class="ghost" id="copyBtn">COPY RESULT</button>
+      <button id="againBtn">PLAY AGAIN</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+const C = { phos:"#7df9ff", star:"#ffe66d", danger:"#ff4d6d", worm:"#c77dff", ink:"#d8f6ff", dim:"#2b4a55" };
+
+/* ---------- daily seed ---------- */
+const today = new Date().toISOString().slice(0,10);           // UTC: same sector worldwide
+const EPOCH = Date.UTC(2026,9,20);
+const sectorNo = Math.max(1, Math.floor((Date.parse(today) - EPOCH)/864e5) + 1);
+const sectorTag = "#" + String(sectorNo).padStart(3,"0");
+$("sectorLabel").textContent = "Sector " + sectorTag + " · " + today;
+function hashStr(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
+function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+/* ---------- storage (per viewer convenience) ---------- */
+const store = {
+  get(k){try{return localStorage.getItem(k);}catch(e){return null;}},
+  set(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+};
+const BLOCK = new Set(["ASS","FUK","FUC","FCK","SEX","KKK","NIG","FAG","DIK","DIC","CUM","TIT","WTF","KYS","XXX","POO","PIS","SHT","GAY","NAZ","HOE","JEW"]);
+const initialsEl = $("initials");
+initialsEl.value = store.get("sp_initials") || "";
+initialsEl.addEventListener("input",()=>{initialsEl.value = initialsEl.value.toUpperCase().replace(/[^A-Z]/g,"").slice(0,3);});
+function localBest(){return Number(store.get("sp_best_"+today)||0);}
+
+/* ---------- world ---------- */
+const WW = 1800, WH = 2400;
+let W; // world state
+function buildWorld(){
+  const r = rng(hashStr("starping:"+today));
+  const rand=(a,b)=>a+(b-a)*r();
+  const start={x:WW/2,y:WH-150};
+  const worm={x:rand(300,WW-300),y:rand(180,420),r:36};
+  const rocks=[],stars=[],lurkers=[];
+  const clear=(x,y,d,list)=>list.every(o=>Math.hypot(o.x-x,o.y-y)>d+(o.r||0));
+  let guard=0;
+  while(rocks.length<34 && guard++<4000){
+    const x=rand(60,WW-60),y=rand(60,WH-60),rr=rand(26,78);
+    if(Math.hypot(x-start.x,y-start.y)<260||Math.hypot(x-worm.x,y-worm.y)<170)continue;
+    if(!clear(x,y,rr+40,rocks))continue;
+    const n=7+Math.floor(r()*4),pts=[];
+    for(let i=0;i<n;i++){const a=i/n*Math.PI*2,d=rr*(0.72+r()*0.38);pts.push([Math.cos(a)*d,Math.sin(a)*d]);}
+    rocks.push({x,y,r:rr,pts,seen:-99});
+  }
+  guard=0;
+  while(stars.length<32 && guard++<4000){
+    const x=rand(50,WW-50),y=rand(80,WH-80);
+    if(!clear(x,y,40,rocks)||!clear(x,y,60,stars))continue;
+    if(Math.hypot(x-start.x,y-start.y)<120)continue;
+    stars.push({x,y,r:0,seen:-99,got:false,gold:false,ph:r()*6});
+  }
+  // golden star: far from start, in a corner region
+  guard=0; let g=null;
+  while(!g && guard++<2000){
+    const x=r()<.5?rand(80,420):rand(WW-420,WW-80), y=rand(300,1300);
+    if(clear(x,y,60,rocks))g={x,y,r:0,seen:-99,got:false,gold:true,ph:0};
+  }
+  if(g)stars.push(g);
+  guard=0;
+  while(lurkers.length<8 && guard++<4000){
+    const x=rand(120,WW-120),y=rand(150,WH-500);
+    if(!clear(x,y,60,rocks)||Math.hypot(x-start.x,y-start.y)<500)continue;
+    lurkers.push({x,y,hx:x,hy:y,seen:-99,awake:0,a:r()*6});
+  }
+  return {rocks,stars,lurkers,worm,start};
+}
+
+/* ---------- game state ---------- */
+const RUN = 60, SPEED = 200, TURN = 4.2, PING_CD = 1.5, PING_T = 0.9, PING_R = 540, SEE = 2.2;
+let S = null, mode = "title", tNow = 0, last = 0;
+function newRun(){
+  W = buildWorld();
+  S = { x:W.start.x, y:W.start.y, a:-Math.PI/2, t:0, stars:0, pts:0, combo:1, lastGrab:-9, gold:false,
+        ping:null, pingReady:0, pingId:0, trail:[], wormSeen:false, dead:null, end:null, sparks:[] };
+}
+
+/* ---------- input ---------- */
+const input = { down:false, sx:0, sy:0, px:0, py:0, t0:0, moved:0, left:false, right:false, mouse:false };
+cv.addEventListener("pointerdown",e=>{ if(mode!=="play")return; e.preventDefault();
+  input.down=true; input.t0=performance.now(); input.px=input.sx=e.clientX; input.py=input.sy=e.clientY; input.moved=0;
+  input.mouse = e.pointerType==="mouse"; try{cv.setPointerCapture(e.pointerId);}catch(_){} audioInit(); });
+cv.addEventListener("pointermove",e=>{ if(e.pointerType==="mouse"){input.mouse=true;input.px=e.clientX;input.py=e.clientY;}
+  if(!input.down)return; input.px=e.clientX; input.py=e.clientY; input.moved=Math.max(input.moved,Math.hypot(e.clientX-input.sx,e.clientY-input.sy)); });
+const up=e=>{ if(!input.down)return; input.down=false;
+  if(mode==="play" && (performance.now()-input.t0<230 && input.moved<18 || input.mouse)) doPing(); };
+cv.addEventListener("pointerup",up); cv.addEventListener("pointercancel",()=>{input.down=false;});
+addEventListener("keydown",e=>{
+  if(mode!=="play")return;
+  if(e.code==="Space"){e.preventDefault(); if(!e.repeat)doPing();}
+  if(e.code==="ArrowLeft"||e.code==="KeyA")input.left=true;
+  if(e.code==="ArrowRight"||e.code==="KeyD")input.right=true;
+});
+addEventListener("keyup",e=>{ if(e.code==="ArrowLeft"||e.code==="KeyA")input.left=false; if(e.code==="ArrowRight"||e.code==="KeyD")input.right=false; });
+
+/* ---------- sound: 4-voice synth ---------- */
+let AC=null;
+function audioInit(){ if(AC)return; try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;} }
+function beep(f0,f1,dur,type="square",vol=.08){
+  if(!AC)return; const o=AC.createOscillator(),g=AC.createGain(),t=AC.currentTime;
+  o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(Math.max(30,f1),t+dur);
+  g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+dur+.02);
+}
+function noise(dur,vol=.2){ if(!AC)return; const n=AC.sampleRate*dur,b=AC.createBuffer(1,n,AC.sampleRate),d=b.getChannelData(0);
+  for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n); const s=AC.createBufferSource(),g=AC.createGain(); g.gain.value=vol; s.buffer=b;s.connect(g);g.connect(AC.destination);s.start(); }
+function buzz(ms){ try{navigator.vibrate&&navigator.vibrate(ms);}catch(e){} }
+
+/* ---------- actions ---------- */
+function doPing(){
+  if(S.t<S.pingReady||S.end)return;
+  S.pingId++; S.ping={x:S.x,y:S.y,t0:S.t,id:S.pingId}; S.pingReady=S.t+PING_CD;
+  beep(1400,320,.5,"sine",.09); buzz(12);
+}
+function endRun(kind){
+  if(S.end)return; S.end={kind,t:S.t};
+  if(kind==="escape"){ const left=Math.max(0,Math.ceil(RUN-S.t)); S.final=S.pts+left*2; beep(220,1800,.9,"triangle",.1); }
+  else { S.final=0; noise(.6,.25); beep(300,40,.6,"sawtooth",.08); buzz(120);
+    for(let i=0;i<22;i++){const a=Math.random()*6.28,v=60+Math.random()*220;S.sparks.push({x:S.x,y:S.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,l:1});} }
+  setTimeout(showOver, 1100);
+}
+
+/* ---------- update ---------- */
+function vis(o){ return Math.max(0,1-(S.t-o.seen)/SEE); }
+function update(dt){
+  if(!S||S.end){ if(S)S.sparks.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.l-=dt;}); return; }
+  S.t+=dt;
+  if(S.t>=RUN){endRun("time");return;}
+  // steering
+  let target=null;
+  if(input.down || (input.mouse && mode==="play")){
+    const p=screenToWorld(input.px,input.py); target=Math.atan2(p.y-S.y,p.x-S.x);
+    if(input.mouse && !input.down && Math.hypot(p.x-S.x,p.y-S.y)<30) target=null;
+  }
+  if(target!==null){ let d=target-S.a; d=Math.atan2(Math.sin(d),Math.cos(d)); S.a+=Math.max(-TURN*dt,Math.min(TURN*dt,d)); }
+  if(input.left)S.a-=TURN*dt; if(input.right)S.a+=TURN*dt;
+  S.x+=Math.cos(S.a)*SPEED*dt; S.y+=Math.sin(S.a)*SPEED*dt;
+  // walls: bounce
+  if(S.x<12||S.x>WW-12){S.a=Math.PI-S.a;S.x=Math.max(12,Math.min(WW-12,S.x));beep(180,120,.08);}
+  if(S.y<12||S.y>WH-12){S.a=-S.a;S.y=Math.max(12,Math.min(WH-12,S.y));beep(180,120,.08);}
+  S.trail.push([S.x,S.y]); if(S.trail.length>40)S.trail.shift();
+  // ping reveal
+  if(S.ping){
+    const age=S.t-S.ping.t0, rad=PING_R*Math.min(1,age/PING_T);
+    const reveal=o=>{ if(o.pid!==S.ping.id && Math.hypot(o.x-S.ping.x,o.y-S.ping.y)<=rad){o.pid=S.ping.id;o.seen=S.t;return true;}return false;};
+    W.rocks.forEach(reveal); W.stars.forEach(reveal);
+    if(reveal(W.worm))S.wormSeen=true;
+    W.lurkers.forEach(l=>{ if(reveal(l)&&l.awake<=0){l.awake=4.5;beep(90,60,.35,"sawtooth",.07);buzz(40);} });
+    if(age>PING_T+.1)S.ping=null;
+  }
+  // lurkers
+  for(const l of W.lurkers){
+    l.a+=dt*2;
+    if(l.awake>0){ l.awake-=dt; const a=Math.atan2(S.y-l.y,S.x-l.x); l.x+=Math.cos(a)*155*dt; l.y+=Math.sin(a)*155*dt; l.seen=S.t; }
+    else { const a=Math.atan2(l.hy-l.y,l.hx-l.x),d=Math.hypot(l.hy-l.y,l.hx-l.x); if(d>2){l.x+=Math.cos(a)*40*dt;l.y+=Math.sin(a)*40*dt;} }
+    if(Math.hypot(l.x-S.x,l.y-S.y)<20){endRun("lurker");return;}
+  }
+  // rocks
+  for(const k of W.rocks){ if(Math.hypot(k.x-S.x,k.y-S.y)<k.r*0.78+6){k.seen=S.t;endRun("rock");return;} }
+  // stars
+  for(const s of W.stars){ if(s.got)continue;
+    if(Math.hypot(s.x-S.x,s.y-S.y)<(s.gold?28:24)){
+      s.got=true;
+      S.combo = (S.t-S.lastGrab<2.5) ? Math.min(5,S.combo+1) : 1; S.lastGrab=S.t;
+      if(s.gold){S.gold=true;S.pts+=25*S.combo;beep(660,1760,.45,"triangle",.1);beep(990,2640,.5,"square",.04);buzz(60);}
+      else{S.stars++;S.pts+=10*S.combo;beep(880+S.combo*120,1700+S.combo*200,.12,"square",.06);buzz(8);}
+    } }
+  if(S.t-S.lastGrab>2.5)S.combo=1;
+  // wormhole
+  if(Math.hypot(W.worm.x-S.x,W.worm.y-S.y)<W.worm.r){endRun("escape");}
+}
+
+/* ---------- render ---------- */
+let VS=1, DPR=1;
+function resize(){ DPR=Math.min(2,devicePixelRatio||1); cv.width=innerWidth*DPR; cv.height=innerHeight*DPR;
+  VS=Math.min(innerWidth, innerHeight*0.8)/620; }
+addEventListener("resize",resize); resize();
+function cam(){ const vw=innerWidth/VS, vh=innerHeight/VS;
+  let cx=(S?S.x:WW/2)-vw/2, cy=(S?S.y:WH-600)-vh*0.55;
+  cx=Math.max(-40,Math.min(WW-vw+40,cx)); cy=Math.max(-40,Math.min(WH-vh+40,cy)); return {cx,cy,vw,vh}; }
+function screenToWorld(x,y){ const c=cam(); return {x:c.cx+x/VS, y:c.cy+y/VS}; }
+
+function glow(col,blur,alpha,lw=1.6){ ctx.strokeStyle=col; ctx.fillStyle=col; ctx.shadowColor=col; ctx.shadowBlur=blur; ctx.globalAlpha=alpha; ctx.lineWidth=lw; }
+function starShape(x,y,R,ph){ ctx.beginPath(); for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5+ph*.0, d=i%2?R*.45:R; ctx.lineTo(x+Math.cos(a)*d,y+Math.sin(a)*d);} ctx.closePath(); ctx.stroke(); }
+
+// background dust (fixed, decorative)
+const dust=(()=>{const r=rng(7),a=[];for(let i=0;i<180;i++)a.push([r()*WW,r()*WH,r()]);return a;})();
+
+function render(){
+  ctx.setTransform(DPR,0,0,DPR,0,0); ctx.shadowBlur=0; ctx.globalAlpha=1;
+  ctx.fillStyle="rgba(3,4,10,0.55)"; ctx.fillRect(0,0,innerWidth,innerHeight); // phosphor persistence
+  if(!W) return;
+  const c=cam(); ctx.setTransform(DPR*VS,0,0,DPR*VS,-c.cx*DPR*VS,-c.cy*DPR*VS);
+  const t=S?S.t:tNow;
+  // dust + border
+  ctx.fillStyle=C.dim; ctx.globalAlpha=.6; for(const d of dust)ctx.fillRect(d[0],d[1],1+d[2],1+d[2]);
+  glow(C.dim,0,.8,1.2); ctx.setLineDash([6,10]); ctx.strokeRect(0,0,WW,WH); ctx.setLineDash([]);
+  if(!S) return;
+  const prox=o=>Math.max(0,1-Math.hypot(o.x-S.x,o.y-S.y)/110)*.55;
+  // rocks
+  for(const k of W.rocks){ const a=Math.max(vis(k),prox(k)); if(a<=0.01)continue;
+    glow(C.phos,10,a); ctx.beginPath(); k.pts.forEach((p,i)=>i?ctx.lineTo(k.x+p[0],k.y+p[1]):ctx.moveTo(k.x+p[0],k.y+p[1])); ctx.closePath(); ctx.stroke(); }
+  // stars
+  for(const s of W.stars){ if(s.got)continue; const a=Math.max(vis(s),prox(s)); if(a<=0.01)continue;
+    const R=(s.gold?15:9)+Math.sin(t*5+s.ph)*1.5; glow(s.gold?"#fff3b0":C.star,s.gold?22:12,a,s.gold?2.2:1.6); starShape(s.x,s.y,R); }
+  // wormhole
+  { const w=W.worm, a=Math.max(vis(w),prox(w), S.wormSeen?.18:0);
+    if(a>0.01){ glow(C.worm,16,a,1.6); for(let i=0;i<3;i++){ctx.beginPath();ctx.arc(w.x,w.y,w.r-i*10,t*(2+i)+i,t*(2+i)+i+Math.PI*1.4);ctx.stroke();} } }
+  // lurkers
+  for(const l of W.lurkers){ const a=l.awake>0?1:Math.max(vis(l),prox(l)); if(a<=0.01)continue;
+    glow(C.danger,l.awake>0?18:8,a,1.8); ctx.beginPath();
+    for(let i=0;i<8;i++){const ang=l.a+i*Math.PI/4,d=i%2?7:16;ctx.lineTo(l.x+Math.cos(ang)*d,l.y+Math.sin(ang)*d);} ctx.closePath(); ctx.stroke(); }
+  // ping ring
+  if(S.ping){ const age=S.t-S.ping.t0, rad=PING_R*Math.min(1,age/PING_T); glow(C.phos,14,Math.max(0,1-age/(PING_T+.1))*.9,2);
+    ctx.beginPath(); ctx.arc(S.ping.x,S.ping.y,rad,0,Math.PI*2); ctx.stroke(); }
+  // trail + probe
+  glow(C.phos,6,.35,1.2); ctx.beginPath(); S.trail.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke();
+  if(!S.end || S.end.kind==="escape" && S.t-S.end.t<0){
+    glow("#ffffff",14,1,2); ctx.save(); ctx.translate(S.x,S.y); ctx.rotate(S.a);
+    ctx.beginPath(); ctx.moveTo(14,0); ctx.lineTo(-10,-9); ctx.lineTo(-5,0); ctx.lineTo(-10,9); ctx.closePath(); ctx.stroke(); ctx.restore();
+  }
+  for(const p of S.sparks){ if(p.l<=0)continue; glow(C.danger,10,p.l,1.6); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(p.x-p.vx*.04,p.y-p.vy*.04); ctx.stroke(); }
+
+  // HUD (screen space)
+  ctx.setTransform(DPR,0,0,DPR,0,0); ctx.shadowBlur=0; ctx.globalAlpha=1;
+  const top=10+(parseFloat(getComputedStyle(document.documentElement).paddingTop)||0), pad=16;
+  ctx.font="600 15px 'IBM Plex Mono', monospace"; ctx.textBaseline="top";
+  const left=Math.max(0,RUN-S.t);
+  glow(left<10?C.danger:C.phos,8,1); ctx.textAlign="left"; ctx.fillText("TIME "+left.toFixed(1),pad,top);
+  glow(C.star,8,1); ctx.textAlign="right"; ctx.fillText("★ "+S.stars+(S.gold?" + GOLD":"")+"   "+S.pts+" PTS",innerWidth-pad,top);
+  if(S.combo>1){ glow(C.star,10,1); ctx.textAlign="center"; ctx.font="600 18px 'IBM Plex Mono', monospace"; ctx.fillText("COMBO x"+S.combo,innerWidth/2,top+26); }
+  // ping charge bar
+  const ch=Math.min(1,1-(S.pingReady-S.t)/PING_CD); const bw=120,bx=innerWidth/2-bw/2,by=innerHeight-34-(parseFloat(getComputedStyle(document.documentElement).paddingBottom)||0);
+  glow(C.phos,ch>=1?10:0,ch>=1?1:.5,1.2); ctx.strokeRect(bx,by,bw,8); ctx.fillRect(bx,by,bw*Math.max(0,ch),8);
+  ctx.font="600 11px 'IBM Plex Mono', monospace"; ctx.textAlign="center"; ctx.fillText(ch>=1?"PING READY":"CHARGING",innerWidth/2,by-16);
+  // wormhole pointer once seen
+  if(S.wormSeen && !S.end){ const sx=(W.worm.x-c.cx)*VS, sy=(W.worm.y-c.cy)*VS;
+    if(sx<0||sy<0||sx>innerWidth||sy>innerHeight){ const ax=innerWidth/2,ay=innerHeight/2,a=Math.atan2(sy-ay,sx-ax);
+      const R=Math.min(innerWidth,innerHeight)/2-46, px=ax+Math.cos(a)*R, py=ay+Math.sin(a)*R;
+      glow(C.worm,10,.9,2); ctx.save(); ctx.translate(px,py); ctx.rotate(a); ctx.beginPath(); ctx.moveTo(12,0); ctx.lineTo(-6,-8); ctx.lineTo(-6,8); ctx.closePath(); ctx.stroke(); ctx.restore(); } }
+  // first-seconds hint
+  if(S.t<4 && !S.end){ glow(C.ink,0,1-S.t/4); ctx.font="600 14px 'IBM Plex Mono', monospace"; ctx.textAlign="center";
+    ctx.fillText("TAP TO PING",innerWidth/2,innerHeight*0.62); }
+}
+
+function frame(ts){
+  const dt=Math.min(0.05,(ts-last)/1000||0); last=ts; tNow+=dt;
+  if(mode==="play")update(dt); else if(S&&S.end)update(dt);
+  render(); requestAnimationFrame(frame);
+}
+
+/* ---------- menus ---------- */
+function show(id){ ["title","over"].forEach(p=>$(p).hidden=p!==id); }
+$("startBtn").addEventListener("click",()=>{
+  const v=initialsEl.value.toUpperCase();
+  if(!/^[A-Z]{3}$/.test(v)){$("initErr").textContent="Type three letters, like ZRX.";initialsEl.focus();return;}
+  if(BLOCK.has(v)){$("initErr").textContent="Pick other letters.";initialsEl.focus();return;}
+  $("initErr").textContent=""; store.set("sp_initials",v); start();
+});
+$("againBtn").addEventListener("click",start);
+function start(){ audioInit(); beep(440,880,.15,"square",.06); newRun(); mode="play"; show(null); }
+
+let shareStr="";
+function showOver(){
+  mode="over";
+  const ini=store.get("sp_initials")||"???";
+  const k=S.end.kind, esc=k==="escape";
+  $("overTitle").textContent = esc?"escaped!":(k==="time"?"out of time":"crashed");
+  $("overMsg").textContent = esc
+    ? `${S.stars} star${S.stars===1?"":"s"} banked${S.gold?" plus the golden star":""}, ${Math.ceil(RUN-S.end.t)} s to spare.`
+    : (k==="time"?"Find the wormhole before the clock hits zero.":(k==="lurker"?"A lurker caught you. Unbanked stars are lost.":"You hit a rock. Unbanked stars are lost."));
+  $("overScore").textContent=S.final;
+  const prev=localBest(), best=Math.max(prev,S.final); store.set("sp_best_"+today,String(best));
+  $("overBest").textContent = S.final>prev && S.final>0 ? "New personal best today!" : "Your best today: "+best;
+  $("overGolden").textContent="";
+  shareStr=`STARPING ${sectorTag} · ${esc?"★"+S.stars+(S.gold?" +GOLD":""):"✕"} · ${S.final} PTS · ${ini}`;
+  $("shareText").textContent=shareStr;
+  renderBoards();
+  show("over");
+  if(esc) submitRun(ini, S.final, S.stars, S.gold);
+}
+$("copyBtn").addEventListener("click",()=>{
+  const ok=()=>{$("copyBtn").textContent="COPIED";setTimeout(()=>$("copyBtn").textContent="COPY RESULT",1500);};
+  const sel=()=>{const r=document.createRange();r.selectNodeContents($("shareText"));const s=getSelection();s.removeAllRanges();s.addRange(r);};
+  try{ navigator.clipboard.writeText(shareStr).then(ok,sel); }catch(e){ sel(); }
+});
+
+/* ---------- shared galaxy (db) ---------- */
+let db=null, me=null, boardRows=[], golden=null, dbState="loading";
+function renderBoards(){
+  for(const id of ["boardTitle","boardOver"]){
+    const ol=$(id); ol.textContent="";
+    if(dbState!=="on"){ const li=document.createElement("li"); li.className="empty";
+      li.textContent = dbState==="loading" ? "Loading…" : (window.claude ? "Open Starping while signed in to claude.ai to join the daily board. Your best: " : "Shared board not connected in this build. Your best today: ")+localBest();
+      ol.appendChild(li); continue; }
+    if(!boardRows.length){ const li=document.createElement("li"); li.className="empty"; li.textContent="No pilots yet today. Be the first."; ol.appendChild(li); continue; }
+    boardRows.slice(0,id==="boardTitle"?5:5).forEach((r,i)=>{ const li=document.createElement("li"); if(r.id===me)li.className="me";
+      for(const v of [String(i+1), r.initials, String(r.best)]){ const s=document.createElement("span"); s.textContent=v; li.appendChild(s); } ol.appendChild(li); });
+  }
+  const gt = golden ? `★ Today's golden star is named ${golden.initials}` : (dbState==="on" ? "★ Today's golden star is still unclaimed" : "");
+  $("goldenTitle").textContent=gt;
+}
+async function initDb(){
+  try{
+    if(!window.claude||!window.claude.use){dbState="off";renderBoards();return;}
+    const [d,u]=await Promise.all([claude.use("db"),claude.use("user")]);
+    me = u ? await u.id() : null;
+    if(!d||!me){dbState="off";renderBoards();return;}
+    db=d; dbState="on"; renderBoards();
+    db.collection("scores").where("day","==",today).orderBy("best","desc").limit(10).onSnapshot(snap=>{
+      boardRows=snap.docs.map(x=>({id:x.id,...x.data()})); renderBoards();
+    },()=>{dbState="off";renderBoards();});
+    db.doc("stars/"+today).onSnapshot(s=>{ golden=s.exists?s.data():null; renderBoards(); },()=>{});
+  }catch(e){ dbState="off"; renderBoards(); }
+}
+let writing=false;
+async function submitRun(ini,score,stars,gold){
+  if(!db||!me||writing)return; writing=true;
+  try{
+    const ref=db.doc("scores/"+me); const cur=await ref.get(); const d=cur.exists?cur.data():null;
+    if(!d||d.day!==today||score>d.best||d.initials!==ini){
+      const best = d&&d.day===today ? Math.max(d.best,score) : score;
+      await ref.set({initials:ini,day:today,best,stars,t:Date.now()});
+    }
+    if(gold){
+      const sref=db.doc("stars/"+today);
+      const lease=await sref.acquire({holder:me,ttlMs:5000});
+      if(lease.acquired){ const s=await sref.get();
+        if(!s.exists||!s.data().initials){ await sref.set({initials:ini,owner:me,day:today,sector:sectorNo,t:Date.now()});
+          $("overGolden").textContent="★ You named today's golden star "+ini+"!"; beep(523,1046,.6,"triangle",.1); }
+        else $("overGolden").textContent="★ "+s.data().initials+" named the golden star first today.";
+      } else $("overGolden").textContent="★ Someone is claiming the golden star right now.";
+    }
+  }catch(e){ /* board write refused: keep playing locally */ }
+  writing=false;
+}
+
+/* ---------- boot ---------- */
+newRun(); S.t=0; mode="title"; show("title"); renderBoards(); initDb();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
