@@ -4,41 +4,36 @@ Read this before changing anything. The full plan is in `docs/DESIGN.md`.
 
 ## Pillars
 
-1. **Learn it in five seconds.** If a rule needs a sentence of explanation, cut it or show it in play.
-2. **Mission-control honest.** The game looks like a real rocketry livestream: a lander over Mars at night, telemetry on screen, nothing cartoonish. Everything is drawn by code.
-3. **A new verb, not a remake.** Scanning in the dark to find what to grab is the core verb. No reskins of arcade classics. Phase shifts change the rules of flight around that verb; they never turn into another arcade game.
-4. **Players meet through traces.** No chat, no lobbies, no free text. Only three initials. Live pilots in the same launch window are traces too: beacon lights, shared lidar scans, a link line.
+1. **Learn it in five seconds.** One D-pad and one button (A; B does the same). Every stage shows a one-line hint while it loads. Getting hit costs a heart, never the whole mission, and each new stage heals one heart.
+2. **Arcade fusion, on purpose.** A Mars mission played as a medley of clear tributes to Atari and early Nintendo classics: maze chase, space shooter, platformer, block breaker, lunar lander. Pixel art, chiptune, power-ups, 1UPs. References are welcome; copying names, logos or exact level layouts is not.
+3. **Measurably exciting.** Every run records a thrill report (below). A change that makes the numbers worse needs a reason.
+4. **Multiplayer first.** Launch windows put players in the same mission at the same moment. Live pilots, a shared race for the anomaly, a live rank and a link bonus make playing together better than playing alone. No chat, no free text: three initials only.
 5. **Money never buys score.**
 
-## Theme: Starping / Mars
+## Thrill targets (per 60-second mission)
 
-| Game rule | On screen |
-| --- | --- |
-| Player | Reusable lander, seen from above |
-| Ping | Lidar scan (dashed ice-white ring) |
-| Stars | Ice cores (white hexagons) |
-| Golden star | Anomaly (gold diamond); the first pilot to land with it names a crater |
-| Rocks | Boulders, shown as lidar point clouds |
-| Lurkers | Dust devils that wake when scanned |
-| Wormhole | Landing pad with orange lights |
-| Phase shift | Mars weather changes mid-mission: night, dust storm, solar flare, meteor shower |
-| Other live pilots | Blinking beacon lights; lander outline and initials when close |
+| Metric | Target | Where it comes from |
+| --- | --- | --- |
+| Action rate | 8 or more events per 10 s | pickups, kills, power-ups, close calls, landings, stage clears |
+| Quietest stretch | 3 s or less | longest gap between events |
+| Close calls | 5 or more | hazards that pass within a few pixels without a hit |
+| Hits taken | 1–2 on average | more is frustrating, 0 every time is boring |
+| First reward | under 3 s | time to the first event |
+| Lead changes | 1 or more when 2+ pilots share a window | live rank |
 
-## Look
+The game shows these on the results screen and stores the last 40 runs per pilot in `runs/<id>` (owner-readable) for tuning.
 
-- Everything is drawn with Canvas 2D at runtime. No image files, sprites or recorded audio.
-- Night: the terrain stays dark except around the lander's lights; objects appear only when scanned or very close.
-- Palette: void `#000000`, hull `#f2f4f6`, steel `#8d96a0`, rust `#b5532e`, plume `#ff7a2f`, ice `#bfefff`, anomaly gold `#ffc65c`, dust-devil red `#e0603a`. Color means something: ice white collect, gold rare, red danger, orange pad.
-- Type: Archivo Expanded (wide uppercase, tracked) for labels; IBM Plex Mono for every number. No paragraphs during play.
-- HUD: countdown clock, ice and score, 60-second mission timeline, lidar and heading gauges.
-- Sound: Web Audio synth and filtered noise only.
+## Look and sound
+
+- One 192×224 canvas, scaled with crisp pixels. Everything is drawn by code; no image files or recorded audio.
+- 3×5 pixel font. Mars palette: void `#000000`, hull `#f2f4f6`, rust `#b5532e`, ice `#bfefff`, gold `#ffc65c`, danger `#e0603a`, plume `#ff7a2f`. Ice is always what you collect, gold is rare, red-orange is danger.
+- Square-wave chiptune: one short tune per stage, jingles for clears, 1UPs, power-ups and landings.
 
 ## Engineering rules
 
 - Keep the game playable from a single `index.html` until there is a real reason to add a build step.
-- Gameplay values (speed, turn rate, ping timing, counts, scoring) do not change with the theme; change them only on purpose, one at a time.
-- The daily mission must be identical for everyone: all world and terrain generation uses the seeded RNG from the UTC date. Never use `Math.random()` for anything that affects the layout or the score.
-- Phase order, wind and meteor timing come from a seeded RNG of the UTC date plus the launch-window number, so every pilot in the same window gets the same mission.
+- Gameplay randomness comes from the seeded RNG (`R.rng`, seeded by UTC date, launch window and stage). `Math.random()` is only for particles and screen effects.
+- The simulation runs at a fixed 60 Hz step so it feels the same on every phone.
+- Tune one value at a time and re-run the bot play-test (`window.__bot`, `window.__plan`, `window.__sp` are the hooks).
 - Everything multiplayer must degrade to a complete solo game when the platform offers no room or database.
-- Small, single-feature changes, each playable on a phone before the next one starts.
-- Safety for young players: initials are filtered against the blocklist; collect no names, emails or locations.
+- Safety for young players: initials are letters only and filtered against the blocklist; collect no names, emails or locations.
