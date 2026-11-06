@@ -223,7 +223,54 @@ function newRun(w=0){
   if(!terrainImg) buildTerrain();
   S = { x:W.start.x, y:W.start.y, a:-Math.PI/2, t:0, stars:0, pts:0, combo:1, lastGrab:-9, gold:false,
         ping:null, pingReady:0, pingId:0, trail:[], wormSeen:false, end:null, sparks:[], fx:[],
-        win:w, plan:missionPlan(w), phase:-1, shiftT:-9, met:[], metNext:0, flareK:0, stormK:0, launchAt:0, cdLast:99 };
+        win:w, plan:missionPlan(w), phase:-1, shiftT:-9, met:[], metNext:0, flareK:0, stormK:0, launchAt:0, cdLast:99,
+        ext:[], link:null, linkGrabs:0 };
+}
+
+/* ---------- live pilots (room presence): beacons, shared lidar, link ---------- */
+// Pilots flying today show as beacons. Their scans light the ground for you; ice grabbed while linked counts double.
+const LINK_R = 160;
+let room = null, peers = [], extId = 0;
+const peerView = new Map();
+const cl = (v,a,b) => Math.max(a,Math.min(b,v));
+function cleanIni(v){ v=String(v||"").toUpperCase().replace(/[^A-Z]/g,"").slice(0,3); return v.length===3 && !BLOCK.has(v) ? v : "???"; }
+async function initRoom(){
+  if(!window.claude||!window.claude.use) return;
+  let r=null; try{ r=await claude.use("room"); }catch(e){ r=null; }
+  if(!r) return;
+  room=r;
+  try{ room.onPeers(ch=>{ peers=ch.peers.filter(p=>!p.sameTab && p.kind==="viewer"); }, ()=>{ room=null; peers=[]; }); }catch(e){ room=null; }
+}
+let presT=0, presLast="";
+function sendPresence(dt){
+  if(!room) return;
+  presT-=dt; if(presT>0) return; presT=.1;
+  const fly = mode==="play" && S && !S.end;
+  const o = { ini:store.get("sp_initials")||"", day:today, st: fly?"fly":(mode==="countdown"?"wait":"idle"), w:S?S.win:0,
+              x:fly?Math.round(S.x):null, y:fly?Math.round(S.y):null, a:fly?Math.round(S.a*100)/100:null,
+              pg:fly&&S.ping?{x:Math.round(S.ping.x),y:Math.round(S.ping.y),id:S.pingId}:null };
+  const j=JSON.stringify(o);
+  if(j!==presLast){ presLast=j; room.presence(o).catch(()=>{}); }
+}
+const livePilots = st => peers.filter(p=>p.presence && p.presence.day===today && (!st || p.presence.st===st));
+function peerTick(dt){
+  const f=1-Math.exp(-dt*10); let best=LINK_R; S.link=null;
+  for(const p of peers){
+    const pr=p.presence||{};
+    if(pr.day!==today || pr.st!=="fly" || typeof pr.x!=="number" || typeof pr.y!=="number") continue;
+    const tx=cl(pr.x,0,WW), ty=cl(pr.y,0,WH);
+    let v=peerView.get(p.peer);
+    if(!v){ v={x:tx,y:ty,a:0,pid:pr.pg&&pr.pg.id}; peerView.set(p.peer,v); }
+    v.x+=(tx-v.x)*f; v.y+=(ty-v.y)*f; v.a=Number(pr.a)||0; v.ini=cleanIni(pr.ini); v.seenAt=tNow;
+    if(pr.pg && typeof pr.pg.x==="number" && pr.pg.id!==v.pid){ v.pid=pr.pg.id; S.ext.push({x:cl(pr.pg.x,0,WW),y:cl(pr.pg.y,0,WH),t0:S.t,id:++extId}); }
+    const d=Math.hypot(v.x-S.x,v.y-S.y); if(d<best){ best=d; S.link=v; }
+  }
+  for(const [k,v] of peerView) if(tNow-v.seenAt>3) peerView.delete(k);
+  // other pilots' scans reveal the ground for you (they do not wake dust devils)
+  for(const e of S.ext){ const rad=PING_R*Math.min(1,(S.t-e.t0)/PING_T);
+    const rv=o=>{ if(o.xpid!==e.id && Math.hypot(o.x-e.x,o.y-e.y)<=rad){ o.xpid=e.id; o.seen=S.t; return true; } return false; };
+    W.rocks.forEach(rv); W.stars.forEach(rv); W.lurkers.forEach(rv); if(rv(W.worm)) S.wormSeen=true; }
+  S.ext=S.ext.filter(e=>S.t-e.t0<PING_T+.2);
 }
 
 /* ---------- input ---------- */
@@ -282,6 +329,7 @@ function update(dt){
   if(!S||S.end){ if(S)S.sparks.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.97;p.vy*=.97;p.l-=dt*.8;}); return; }
   S.t+=dt;
   if(S.t>=RUN){endRun("time");return;}
+  peerTick(dt);
   const pi=Math.min(3,Math.floor(S.t/PHASE_T)), ph=S.plan.phases[pi];
   if(pi!==S.phase){ S.phase=pi; S.shiftT=S.t; if(pi>0){shiftSound();buzz(30);} if(ph==="meteor")S.metNext=S.t+.8; }
   S.flareK+=((ph==="flare"?1:0)-S.flareK)*Math.min(1,dt*3);
@@ -332,9 +380,10 @@ function update(dt){
     if(Math.hypot(s.x-S.x,s.y-S.y)<(s.gold?28:24)){
       s.got=true;
       S.combo = (S.t-S.lastGrab<2.5) ? Math.min(5,S.combo+1) : 1; S.lastGrab=S.t;
-      S.fx.push({x:s.x,y:s.y,t:S.t,gold:s.gold});
-      if(s.gold){S.gold=true;S.pts+=25*S.combo;beep(660,1320,.35,"triangle",.09);setTimeout(()=>beep(990,1980,.45,"sine",.06),120);buzz(60);}
-      else{S.stars++;S.pts+=10*S.combo;beep(1200+S.combo*160,2200+S.combo*200,.1,"sine",.06);buzz(8);}
+      S.fx.push({x:s.x,y:s.y,t:S.t,gold:s.gold,link:!!S.link});
+      const lk=S.link?2:1; if(lk>1)S.linkGrabs++;
+      if(s.gold){S.gold=true;S.pts+=25*S.combo*lk;beep(660,1320,.35,"triangle",.09);setTimeout(()=>beep(990,1980,.45,"sine",.06),120);buzz(60);}
+      else{S.stars++;S.pts+=10*S.combo*lk;beep(1200+S.combo*160,2200+S.combo*200,.1,"sine",.06);buzz(8);}
     } }
   if(S.t-S.lastGrab>2.5)S.combo=1;
   if(Math.hypot(W.worm.x-S.x,W.worm.y-S.y)<W.worm.r){endRun("escape");}
@@ -463,13 +512,27 @@ function render(){
     else { const q=(age-MET_WARN)/.7; ctx.globalAlpha=Math.max(0,1-q); ctx.fillStyle="rgba(255,190,120,.35)"; ctx.beginPath(); ctx.arc(m.x,m.y,MET_LIGHT*Math.min(1,q*3),0,Math.PI*2); ctx.fill();
       ctx.strokeStyle=K.plume; ctx.lineWidth=2; ctx.shadowColor=K.plume; ctx.shadowBlur=14; ctx.beginPath(); ctx.arc(m.x,m.y,MET_R*.7+q*40,0,Math.PI*2); ctx.stroke(); }
     ctx.restore(); }
+  // other live pilots: beacon always, outline and initials when close; their scan rings
+  for(const e of S.ext){ const age=S.t-e.t0, rad=PING_R*Math.min(1,age/PING_T);
+    ctx.save(); ctx.strokeStyle=K.ice; ctx.globalAlpha=Math.max(0,.55-age/(PING_T+.2)*.55); ctx.lineWidth=1.2; ctx.setLineDash([2,7]);
+    ctx.beginPath(); ctx.arc(e.x,e.y,rad,0,Math.PI*2); ctx.stroke(); ctx.restore(); }
+  if(mode==="play"||mode==="over") for(const v of peerView.values()){
+    const d=Math.hypot(v.x-S.x,v.y-S.y), near=Math.max(0,Math.min(1,(300-d)/120), fk);
+    if(near>.01){ ctx.save(); ctx.globalAlpha=.5*near; lander(ctx,v.x,v.y,v.a,.95); ctx.restore();
+      txt(ctx,v.ini,v.x,v.y-24,{mono:true,size:11,align:"center",color:K.hull,alpha:.85*near}); }
+    const on=(tNow*1.25+((v.x*7)%1))%1<.18;
+    ctx.save(); ctx.fillStyle=on?"#ffffff":"rgba(242,244,246,.35)"; ctx.shadowColor="#fff"; ctx.shadowBlur=on?14:0;
+    ctx.beginPath(); ctx.arc(v.x,v.y,on?3:2,0,Math.PI*2); ctx.fill(); ctx.restore();
+  }
+  if(S.link && !S.end){ ctx.save(); ctx.strokeStyle=K.ice; ctx.globalAlpha=.75; ctx.lineWidth=1.4; ctx.setLineDash([2,5]); ctx.lineDashOffset=-tNow*30;
+    ctx.shadowColor=K.ice; ctx.shadowBlur=8; ctx.beginPath(); ctx.moveTo(S.x,S.y); ctx.lineTo(S.link.x,S.link.y); ctx.stroke(); ctx.restore(); }
   // lidar ring
   if(S.ping){ const age=S.t-S.ping.t0, rad=PING_R*Math.min(1,age/PING_T);
     ctx.save(); ctx.strokeStyle=K.ice; ctx.globalAlpha=Math.max(0,1-age/(PING_T+.1)); ctx.lineWidth=1.8; ctx.setLineDash([3,6]); ctx.shadowColor=K.ice; ctx.shadowBlur=10;
     ctx.beginPath(); ctx.arc(S.ping.x,S.ping.y,rad,0,Math.PI*2); ctx.stroke();
     ctx.globalAlpha*=.35; ctx.setLineDash([]); ctx.lineWidth=6; ctx.beginPath(); ctx.arc(S.ping.x,S.ping.y,rad,0,Math.PI*2); ctx.stroke(); ctx.restore(); }
   // pickup flashes
-  for(const f of S.fx){ const age=S.t-f.t; if(age>.6)continue; ctx.save(); ctx.strokeStyle=f.gold?K.gold:K.ice; ctx.globalAlpha=1-age/.6; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(f.x,f.y,10+age*70,0,Math.PI*2); ctx.stroke(); ctx.restore(); }
+  for(const f of S.fx){ const age=S.t-f.t; if(age>.6)continue; if(f.link) txt(ctx,"×2",f.x,f.y-16-age*30,{mono:true,size:12,align:"center",color:K.ice,alpha:1-age/.6}); ctx.save(); ctx.strokeStyle=f.gold?K.gold:K.ice; ctx.globalAlpha=1-age/.6; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(f.x,f.y,10+age*70,0,Math.PI*2); ctx.stroke(); ctx.restore(); }
   // track + lander
   ctx.save(); ctx.strokeStyle="rgba(242,244,246,.4)"; ctx.setLineDash([1,6]); ctx.lineWidth=1.6; ctx.beginPath(); S.trail.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke(); ctx.restore();
   if(!S.end || S.end.kind==="escape") lander(ctx,S.x,S.y,S.a,1.1);
@@ -492,6 +555,8 @@ function render(){
   txt(ctx,"ICE "+String(S.stars).padStart(2,"0")+"  ·  "+S.pts,Wd-pad16,top+32,{mono:true,size:17,align:"right"});
   if(S.gold) txt(ctx,"ANOMALY ON BOARD",Wd-pad16,top+52,{size:9,weight:600,track:2.5,align:"right",color:K.gold});
   ctx.fillStyle="rgba(242,244,246,.2)"; ctx.fillRect(pad16,top+44,Wd-pad16*2-(S.gold?150:0),1);
+  if(S.link && !S.end) txt(ctx,"LINK "+S.link.ini+" · ICE ×2",pad16,top+60,{size:9,weight:600,track:2.5,color:K.ice});
+  else if(room && mode==="play"){ const n=livePilots("fly").length; if(n) txt(ctx,n+" PILOT"+(n>1?"S":"")+" FLYING",pad16,top+60,{size:9,weight:600,track:2.5,color:K.steel}); }
   if(S.combo>1) txt(ctx,"COMBO ×"+S.combo,Wd/2,top+74,{size:14,weight:600,track:4,align:"center",color:K.plume});
   const by=Hd-ins.b-62, gr=Math.min(34,Wd*.08);
   const ch=Math.min(1,1-(S.pingReady-S.t)/PING_CD);
@@ -524,6 +589,8 @@ function render(){
     const names=S.plan.phases.map(k=>PHASES[k]), gap=Math.min(86,(Wd-40)/4);
     names.forEach((P,i)=>txt(ctx,P.short,Wd/2+(i-1.5)*gap,Hd*.28+86,{size:10,weight:600,track:2.5,align:"center",color:P.col}));
     txt(ctx,"MISSION PLAN · 15 S EACH",Wd/2,Hd*.28+104,{size:9,weight:600,track:3,align:"center",color:K.steel});
+    const crew=livePilots("wait").filter(p=>p.presence.w===S.win).map(p=>cleanIni(p.presence.ini));
+    if(crew.length) txt(ctx,"IN THIS WINDOW: "+crew.slice(0,6).join(" · "),Wd/2,Hd*.28+130,{mono:true,size:12,align:"center",color:K.ice});
   }
 }
 
@@ -536,7 +603,7 @@ function frame(ts){
   }
   else if(mode==="play")update(dt); else if(S&&S.end)update(dt);
   else if(S && mode==="title"){ S.t=tNow; S.x=WW/2+260*Math.sin(tNow*.2); S.y=WH-500+180*Math.sin(tNow*.15); S.a=Math.atan2(180*.15*Math.cos(tNow*.15),260*.2*Math.cos(tNow*.2)); S.pingReady=0; }
-  render(); requestAnimationFrame(frame);
+  sendPresence(dt); render(); requestAnimationFrame(frame);
 }
 
 /* ---------- menus ---------- */
@@ -549,7 +616,10 @@ $("startBtn").addEventListener("click",()=>{
 });
 $("againBtn").addEventListener("click",start);
 function start(){ audioInit(); beep(220,440,.2,"triangle",.06); const w=nextWindow(); newRun(w); S.launchAt=w*WINDOW_MS; mode="countdown"; show(null); }
-function tickWindowLine(){ if(mode==="title"||mode==="over"){ const s=Math.ceil((nextWindow()*WINDOW_MS-Date.now())/1000); $("windowLine").textContent="NEXT LAUNCH WINDOW "+windowLabel(nextWindow())+" · T−"+String(s).padStart(2,"0"); } }
+function tickWindowLine(){ if(mode==="title"||mode==="over"){ const s=Math.ceil((nextWindow()*WINDOW_MS-Date.now())/1000); let line="NEXT LAUNCH WINDOW "+windowLabel(nextWindow())+" · T−"+String(s).padStart(2,"0");
+    if(room){ const wait=livePilots("wait").filter(p=>p.presence.w===nextWindow()).length, fly=livePilots("fly").length;
+      if(wait) line+=" · "+wait+" WAITING"; if(fly) line+=" · "+fly+" FLYING"; }
+    $("windowLine").textContent=line; } }
 setInterval(tickWindowLine,250);
 
 let shareStr="";
@@ -565,6 +635,7 @@ function showOver(){
   const prev=localBest(), best=Math.max(prev,S.final); store.set("sp_best_"+today,String(best));
   $("overBest").textContent = S.final>prev && S.final>0 ? "New personal best today." : "Your best today: "+best;
   $("overGolden").textContent="";
+  if(S.linkGrabs) $("overBest").textContent+=` · ${S.linkGrabs} ice linked with another pilot.`;
   shareStr=`STARPING MISSION ${missionTag} · ${esc?"LANDED · "+S.stars+" ICE"+(S.gold?" + ANOMALY":""):"LOST"} · ${S.final} PTS · ${ini}`;
   $("shareText").textContent=shareStr;
   renderBoards();
@@ -627,7 +698,7 @@ async function submitRun(ini,score,stars,gold){
 }
 
 /* ---------- boot ---------- */
-newRun(); mode="title"; show("title"); renderBoards(); initDb();
+newRun(); mode="title"; show("title"); renderBoards(); initDb(); initRoom();
 requestAnimationFrame(frame);
 })();
 </script>
