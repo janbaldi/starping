@@ -6,8 +6,8 @@ Read this before changing anything. The full plan is in `docs/DESIGN.md`.
 
 1. **Learn it in five seconds.** If a rule needs a sentence of explanation, cut it or show it in play.
 2. **Mission-control honest.** The game looks like a real rocketry livestream: a lander over Mars at night, telemetry on screen, nothing cartoonish. Everything is drawn by code.
-3. **A new verb, not a remake.** Scanning in the dark to find what to grab is the core verb. No reskins of arcade classics.
-4. **Players meet through traces.** No chat, no lobbies, no free text. Only three initials.
+3. **A new verb, not a remake.** Scanning in the dark to find what to grab is the core verb. No reskins of arcade classics. Phase shifts change the rules of flight around that verb; they never turn into another arcade game.
+4. **Players meet through traces.** No chat, no lobbies, no free text. Only three initials. Live pilots in the same launch window are traces too: beacon lights, shared lidar scans, a link line.
 5. **Money never buys score.**
 
 ## Theme: Starping / Mars
@@ -21,6 +21,8 @@ Read this before changing anything. The full plan is in `docs/DESIGN.md`.
 | Rocks | Boulders, shown as lidar point clouds |
 | Lurkers | Dust devils that wake when scanned |
 | Wormhole | Landing pad with orange lights |
+| Phase shift | Mars weather changes mid-mission: night, dust storm, solar flare, meteor shower |
+| Other live pilots | Blinking beacon lights; lander outline and initials when close |
 
 ## Look
 
@@ -36,5 +38,7 @@ Read this before changing anything. The full plan is in `docs/DESIGN.md`.
 - Keep the game playable from a single `index.html` until there is a real reason to add a build step.
 - Gameplay values (speed, turn rate, ping timing, counts, scoring) do not change with the theme; change them only on purpose, one at a time.
 - The daily mission must be identical for everyone: all world and terrain generation uses the seeded RNG from the UTC date. Never use `Math.random()` for anything that affects the layout or the score.
+- Phase order, wind and meteor timing come from a seeded RNG of the UTC date plus the launch-window number, so every pilot in the same window gets the same mission.
+- Everything multiplayer must degrade to a complete solo game when the platform offers no room or database.
 - Small, single-feature changes, each playable on a phone before the next one starts.
 - Safety for young players: initials are filtered against the blocklist; collect no names, emails or locations.
