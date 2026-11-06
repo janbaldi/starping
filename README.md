@@ -22,10 +22,15 @@ To play it on your phone from this repo, turn on GitHub Pages (Settings → Page
 - **Avoid boulders and dust devils.** Dust devils sleep until a scan hits them, then chase you.
 - **Land on the pad** to bank your ice. Crash or run out of time and it is lost.
 - Score: ice × combo, plus 2 points for every second left.
+- **Launch windows:** a mission launches every 15 seconds. Everyone who presses Launch in the same window starts on the pad together and flies the same mission.
+- **Phase shifts:** the 60 seconds are four 15-second phases. Night comes first; then dust storm (wind pushes you), solar flare (everything visible, dust devils hunt) and meteor shower (stay out of the red rings), in an order seeded per window. The timeline shows what is next.
+- **Live pilots:** other pilots flying today show as blinking beacons. Their lidar scans light up the ground for you, and ice you grab while linked to a nearby pilot counts double.
 
 ## What is in this build
 
 - Daily mission generated from the UTC date, identical for every player, including the terrain
+- Launch windows every 15 s and four seeded phases per mission
+- Live pilots, shared lidar and the link bonus (claude.ai version; offline builds play solo)
 - Mission-control display: countdown, ice and score, 60-second timeline, lidar and heading gauges
 - Synth sound with engine rumble, phone vibration
 - Copyable result line for sharing
