@@ -79,6 +79,7 @@ button:focus-visible{outline:2px solid var(--plume);outline-offset:3px;}
       <b>TAP</b><span>lidar scan: see what hides in the dark</span>
       <b>GRAB</b><span class="i">ice cores, then touch down on the pad</span>
       <b>AVOID</b><span class="d">boulders, and dust devils that wake when scanned</span>
+      <b>SHIFT</b><span>every 15 s Mars changes the rules</span>
     </div>
     <div class="golden" id="goldenTitle"></div>
     <div class="board"><h3>TODAY'S TOP PILOTS</h3><ol id="boardTitle"><li class="empty">Loading…</li></ol></div>
@@ -88,7 +89,8 @@ button:focus-visible{outline:2px solid var(--plume);outline-offset:3px;}
     </div>
     <div class="err" id="initErr"></div>
     <button id="startBtn">Launch</button>
-    <div class="note">Laptop: mouse to steer, click or space to scan. Same mission for everyone today; your best landing counts.</div>
+    <div class="mission" id="windowLine">&nbsp;</div>
+    <div class="note">Laptop: mouse to steer, click or space to scan. A mission launches every 15 seconds; everyone in the same launch window flies it together. Your best landing today counts.</div>
   </div>
 </div>
 
@@ -194,14 +196,34 @@ function buildTerrain(){
   terrainImg=o;
 }
 
+/* ---------- launch windows and phase shifts ---------- */
+// A mission launches every 15 s on the UTC clock. Everyone in the same window gets the same plan.
+const WINDOW_MS = 15000, PHASE_T = 15, WIND = 75, MET_WARN = 1.3, MET_R = 30, MET_LIGHT = 130;
+const PHASES = {
+  night:  { name:"NIGHT",         short:"NIGHT",   sub:"TAP TO SCAN",                     col:K.ice },
+  storm:  { name:"DUST STORM",    short:"STORM",   sub:"WIND PUSHES THE LANDER",          col:"#d0714a" },
+  flare:  { name:"SOLAR FLARE",   short:"FLARE",   sub:"ALL IN SIGHT · DUST DEVILS HUNT", col:K.hull },
+  meteor: { name:"METEOR SHOWER", short:"METEORS", sub:"STAY OUT OF THE RED RINGS",       col:K.devil }
+};
+const nextWindow = () => Math.floor(Date.now()/WINDOW_MS) + 1;
+const windowLabel = w => new Date(w*WINDOW_MS).toISOString().slice(11,19) + "Z";
+function missionPlan(w){
+  const r = rng(hashStr("plan:"+today+":"+w));
+  const rest = ["storm","flare","meteor"];
+  for(let i=rest.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [rest[i],rest[j]]=[rest[j],rest[i]]; }
+  const wa = r()*Math.PI*2;
+  return { phases:["night",...rest], wind:{x:Math.cos(wa),y:Math.sin(wa)}, met:rng(hashStr("meteor:"+today+":"+w)) };
+}
+
 /* ---------- game state ---------- */
 const RUN = 60, SPEED = 200, TURN = 4.2, PING_CD = 1.5, PING_T = 0.9, PING_R = 540, SEE = 2.2;
 let S = null, mode = "title", tNow = 0, last = 0;
-function newRun(){
+function newRun(w=0){
   W = buildWorld();
   if(!terrainImg) buildTerrain();
   S = { x:W.start.x, y:W.start.y, a:-Math.PI/2, t:0, stars:0, pts:0, combo:1, lastGrab:-9, gold:false,
-        ping:null, pingReady:0, pingId:0, trail:[], wormSeen:false, end:null, sparks:[], fx:[] };
+        ping:null, pingReady:0, pingId:0, trail:[], wormSeen:false, end:null, sparks:[], fx:[],
+        win:w, plan:missionPlan(w), phase:-1, shiftT:-9, met:[], metNext:0, flareK:0, stormK:0, launchAt:0, cdLast:99 };
 }
 
 /* ---------- input ---------- */
@@ -237,6 +259,7 @@ function engineOn(){ if(!AC||rumble)return; const n=AC.sampleRate*2,b=AC.createB
   const s=AC.createBufferSource(),f=AC.createBiquadFilter(),g=AC.createGain(); s.buffer=b;s.loop=true;f.type="lowpass";f.frequency.value=160;g.gain.value=.05;
   s.connect(f);f.connect(g);g.connect(AC.destination);s.start(); rumble={s,g}; }
 function engineOff(){ if(!rumble)return; try{rumble.g.gain.setTargetAtTime(0,AC.currentTime,.15);rumble.s.stop(AC.currentTime+.6);}catch(e){} rumble=null; }
+function shiftSound(){ beep(880,1320,.07,"square",.035); setTimeout(()=>beep(1320,660,.12,"square",.035),80); noise(.25,.12,2400); }
 function buzz(ms){ try{navigator.vibrate&&navigator.vibrate(ms);}catch(e){} }
 
 /* ---------- actions ---------- */
@@ -259,6 +282,10 @@ function update(dt){
   if(!S||S.end){ if(S)S.sparks.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.97;p.vy*=.97;p.l-=dt*.8;}); return; }
   S.t+=dt;
   if(S.t>=RUN){endRun("time");return;}
+  const pi=Math.min(3,Math.floor(S.t/PHASE_T)), ph=S.plan.phases[pi];
+  if(pi!==S.phase){ S.phase=pi; S.shiftT=S.t; if(pi>0){shiftSound();buzz(30);} if(ph==="meteor")S.metNext=S.t+.8; }
+  S.flareK+=((ph==="flare"?1:0)-S.flareK)*Math.min(1,dt*3);
+  S.stormK+=((ph==="storm"?1:0)-S.stormK)*Math.min(1,dt*2);
   let target=null;
   if(input.down || (input.mouse && mode==="play")){
     const p=screenToWorld(input.px,input.py); target=Math.atan2(p.y-S.y,p.x-S.x);
@@ -267,6 +294,7 @@ function update(dt){
   if(target!==null){ let d=target-S.a; d=Math.atan2(Math.sin(d),Math.cos(d)); S.a+=Math.max(-TURN*dt,Math.min(TURN*dt,d)); }
   if(input.left)S.a-=TURN*dt; if(input.right)S.a+=TURN*dt;
   S.x+=Math.cos(S.a)*SPEED*dt; S.y+=Math.sin(S.a)*SPEED*dt;
+  if(ph==="storm"){ const g=.65+.35*Math.sin(S.t*1.9)+.2*Math.sin(S.t*5.3); S.x+=S.plan.wind.x*WIND*g*dt; S.y+=S.plan.wind.y*WIND*g*dt; }
   if(S.x<12||S.x>WW-12){S.a=Math.PI-S.a;S.x=Math.max(12,Math.min(WW-12,S.x));beep(160,110,.08,"triangle",.05);}
   if(S.y<12||S.y>WH-12){S.a=-S.a;S.y=Math.max(12,Math.min(WH-12,S.y));beep(160,110,.08,"triangle",.05);}
   S.trail.push([S.x,S.y]); if(S.trail.length>36)S.trail.shift();
@@ -278,8 +306,23 @@ function update(dt){
     W.lurkers.forEach(l=>{ if(reveal(l)&&l.awake<=0){l.awake=4.5;noise(.5,.18,400);buzz(40);} });
     if(age>PING_T+.1)S.ping=null;
   }
+  // meteor shower: seeded impacts marked ahead of the lander; each impact lights the ground like a scan
+  if(ph==="meteor" && S.t>=S.metNext){
+    const r=S.plan.met, lead=.9+r()*.6, ox=(r()-.5)*180, oy=(r()-.5)*180;
+    S.met.push({x:Math.max(20,Math.min(WW-20,S.x+Math.cos(S.a)*SPEED*lead+ox)), y:Math.max(20,Math.min(WH-20,S.y+Math.sin(S.a)*SPEED*lead+oy)), t0:S.t, hit:false});
+    S.metNext=S.t+.45+r()*.35;
+  }
+  for(const m of S.met){
+    if(m.hit || S.t-m.t0<MET_WARN) continue;
+    m.hit=true; noise(.35,.22,500); buzz(15);
+    for(const o of W.rocks.concat(W.stars,W.lurkers)) if(Math.hypot(o.x-m.x,o.y-m.y)<MET_LIGHT) o.seen=S.t;
+    if(Math.hypot(W.worm.x-m.x,W.worm.y-m.y)<MET_LIGHT){W.worm.seen=S.t;S.wormSeen=true;}
+    if(Math.hypot(m.x-S.x,m.y-S.y)<MET_R){endRun("meteor");return;}
+  }
+  S.met=S.met.filter(m=>S.t-m.t0<MET_WARN+.7);
   for(const l of W.lurkers){
     l.a+=dt*2;
+    if(ph==="flare" && Math.hypot(l.x-S.x,l.y-S.y)<520) l.awake=Math.max(l.awake,.3);  // the flare wakes nearby dust devils
     if(l.awake>0){ l.awake-=dt; const a=Math.atan2(S.y-l.y,S.x-l.x); l.x+=Math.cos(a)*155*dt; l.y+=Math.sin(a)*155*dt; l.seen=S.t; }
     else { const a=Math.atan2(l.hy-l.y,l.hx-l.x),d=Math.hypot(l.hy-l.y,l.hx-l.x); if(d>2){l.x+=Math.cos(a)*40*dt;l.y+=Math.sin(a)*40*dt;} }
     if(Math.hypot(l.x-S.x,l.y-S.y)<20){endRun("lurker");return;}
@@ -360,14 +403,20 @@ function gauge(c,x,y,r,v,label,value,hot){
   txt(c,value,x,y+6,{mono:true,size:15,align:"center",color:hot?K.plume:K.hull});
   txt(c,label,x,y+r+6,{size:9,weight:600,track:3,align:"center",color:K.steel});
 }
-function timeline(c,x0,x1,y,p){
-  c.save(); c.strokeStyle="rgba(242,244,246,.25)"; c.lineWidth=1.2; c.beginPath(); c.moveTo(x0,y); c.lineTo(x1,y); c.stroke();
-  c.strokeStyle=K.hull; c.lineWidth=2; c.beginPath(); c.moveTo(x0,y); c.lineTo(x0+(x1-x0)*p,y); c.stroke();
+function timeline(c,x0,x1,y,p,phases){
+  c.save();
+  for(let i=0;i<4;i++){ const a=x0+(x1-x0)*i/4, b=x0+(x1-x0)*(i+1)/4, col=PHASES[phases[i]].col, done=Math.max(0,Math.min(1,p*4-i));
+    c.globalAlpha=.32; c.strokeStyle=col; c.lineWidth=1.4; c.beginPath(); c.moveTo(a,y); c.lineTo(b,y); c.stroke();
+    if(done>0){ c.globalAlpha=1; c.lineWidth=2.4; c.beginPath(); c.moveTo(a,y); c.lineTo(a+(b-a)*done,y); c.stroke(); } }
+  c.globalAlpha=1;
   for(let i=0;i<=4;i++){const x=x0+(x1-x0)*i/4; c.fillStyle=i/4<=p?K.hull:"#000"; c.strokeStyle=K.hull; c.lineWidth=1.2; c.beginPath(); c.arc(x,y,i===0||i===4?4:2.5,0,Math.PI*2); c.fill(); c.stroke();}
   const xp=x0+(x1-x0)*p; c.fillStyle=p>.83?K.devil:K.plume; c.shadowColor=c.fillStyle; c.shadowBlur=10; c.beginPath(); c.arc(xp,y,3.6,0,Math.PI*2); c.fill();
   c.restore();
   txt(c,"LAUNCH",x0,y+20,{size:9,weight:600,track:2.5,align:"center",color:K.steel});
   txt(c,"0:60",x1,y+20,{mono:true,size:10,align:"center",color:K.steel});
+  const cur=PHASES[phases[Math.max(0,Math.min(3,Math.floor(p*4)))]], nx=PHASES[phases[Math.min(3,Math.floor(p*4)+1)]];
+  txt(c,cur.short,(x0+x1)/2,y-12,{size:9,weight:600,track:2.5,align:"center",color:cur.col});
+  if(p<.75 && (p*4)%1>.75) txt(c,"NEXT "+nx.short,(x0+x1)/2,y+20,{size:9,weight:600,track:2.5,align:"center",color:nx.col});
 }
 
 /* ---------- render ---------- */
@@ -388,21 +437,32 @@ function render(){
   const c=cam(), t=S.t;
   ctx.setTransform(DPR*VS,0,0,DPR*VS,-c.cx*DPR*VS,-c.cy*DPR*VS);
   if(terrainImg) ctx.drawImage(terrainImg,0,0,WW,WH);
+  if(S.flareK>.01){ ctx.save(); ctx.globalAlpha=S.flareK*.18; ctx.fillStyle="#ffd9b0"; ctx.fillRect(0,0,WW,WH); ctx.restore(); }
   // night: everything dark except the lander's own lights
   ctx.setTransform(DPR,0,0,DPR,0,0);
-  const sx=(S.x-c.cx)*VS, sy=(S.y-c.cy)*VS, R0=60*VS, R1=260*VS;
-  const dark=ctx.createRadialGradient(sx,sy,R0,sx,sy,R1); dark.addColorStop(0,"rgba(0,0,0,.25)"); dark.addColorStop(1,"rgba(0,0,0,.84)");
+  const fk=S.flareK||0, sk=S.stormK||0;
+  const sx=(S.x-c.cx)*VS, sy=(S.y-c.cy)*VS, R0=60*VS, R1=(260-95*sk)*VS;
+  const dark=ctx.createRadialGradient(sx,sy,R0,sx,sy,R1); dark.addColorStop(0,`rgba(0,0,0,${.25*(1-fk)})`); dark.addColorStop(1,`rgba(0,0,0,${(.84+.1*sk)*(1-.72*fk)})`);
   ctx.fillStyle=dark; ctx.fillRect(0,0,innerWidth,innerHeight);
   ctx.setTransform(DPR*VS,0,0,DPR*VS,-c.cx*DPR*VS,-c.cy*DPR*VS);
   // map edge
   ctx.save(); ctx.strokeStyle="rgba(242,244,246,.18)"; ctx.setLineDash([6,10]); ctx.lineWidth=1.2; ctx.strokeRect(0,0,WW,WH); ctx.restore();
   const prox=o=>Math.max(0,1-Math.hypot(o.x-S.x,o.y-S.y)/120)*.6;
   // pad
-  { const w=W.worm, a=Math.max(vis(w),prox(w),S.wormSeen?.3:0); if(a>.01) pad(ctx,w.x,w.y,w.r,t,a); }
-  for(const k of W.rocks){ const a=Math.max(vis(k),prox(k)); if(a>.01) boulder(ctx,k,a); }
-  for(const s of W.stars){ if(s.got)continue; const a=Math.max(vis(s),prox(s)); if(a<=.01)continue;
+  { const w=W.worm, a=Math.max(vis(w),prox(w),S.wormSeen?.3:0,fk); if(a>.01) pad(ctx,w.x,w.y,w.r,t,a); }
+  for(const k of W.rocks){ const a=Math.max(vis(k),prox(k),fk); if(a>.01) boulder(ctx,k,a); }
+  for(const s of W.stars){ if(s.got)continue; const a=Math.max(vis(s),prox(s),fk); if(a<=.01)continue;
     if(s.gold) anomaly(ctx,s.x,s.y,14,a,t); else ice(ctx,s.x,s.y,11,a,t,s.ph); }
-  for(const l of W.lurkers){ const a=l.awake>0?1:Math.max(vis(l),prox(l)); if(a>.01) devil(ctx,l.x,l.y,l.awake>0?24:16,a,t,l.awake>0); }
+  for(const l of W.lurkers){ const a=l.awake>0?1:Math.max(vis(l),prox(l),fk); if(a>.01) devil(ctx,l.x,l.y,l.awake>0?24:16,a,t,l.awake>0); }
+  // meteor warnings and impacts
+  for(const m of S.met){ const age=S.t-m.t0;
+    ctx.save();
+    if(!m.hit){ const p=Math.min(1,age/MET_WARN); ctx.strokeStyle=K.devil; ctx.shadowColor=K.devil; ctx.shadowBlur=8; ctx.globalAlpha=.45+.55*p; ctx.lineWidth=1.6; ctx.setLineDash([4,5]);
+      ctx.beginPath(); ctx.arc(m.x,m.y,MET_R*(2.4-1.4*p),0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(m.x-6,m.y); ctx.lineTo(m.x+6,m.y); ctx.moveTo(m.x,m.y-6); ctx.lineTo(m.x,m.y+6); ctx.stroke(); }
+    else { const q=(age-MET_WARN)/.7; ctx.globalAlpha=Math.max(0,1-q); ctx.fillStyle="rgba(255,190,120,.35)"; ctx.beginPath(); ctx.arc(m.x,m.y,MET_LIGHT*Math.min(1,q*3),0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle=K.plume; ctx.lineWidth=2; ctx.shadowColor=K.plume; ctx.shadowBlur=14; ctx.beginPath(); ctx.arc(m.x,m.y,MET_R*.7+q*40,0,Math.PI*2); ctx.stroke(); }
+    ctx.restore(); }
   // lidar ring
   if(S.ping){ const age=S.t-S.ping.t0, rad=PING_R*Math.min(1,age/PING_T);
     ctx.save(); ctx.strokeStyle=K.ice; ctx.globalAlpha=Math.max(0,1-age/(PING_T+.1)); ctx.lineWidth=1.8; ctx.setLineDash([3,6]); ctx.shadowColor=K.ice; ctx.shadowBlur=10;
@@ -417,6 +477,10 @@ function render(){
 
   // HUD
   ctx.setTransform(DPR,0,0,DPR,0,0); ctx.shadowBlur=0; ctx.globalAlpha=1;
+  if(S.stormK>.02){ const wx=S.plan.wind.x, wy=S.plan.wind.y, Wd0=innerWidth, Hd0=innerHeight; ctx.save(); ctx.strokeStyle="#c9774f"; ctx.lineWidth=1;
+    for(let i=0;i<70;i++){ const sp=180+(i%7)*45, x=((i*137.1+tNow*wx*sp)%Wd0+Wd0)%Wd0, y=((i*91.7+tNow*wy*sp)%Hd0+Hd0)%Hd0;
+      ctx.globalAlpha=S.stormK*(.25+(i%5)*.08); ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x-wx*(8+i%9),y-wy*(8+i%9)); ctx.stroke(); }
+    ctx.restore(); }
   if(mode==="title") return;
   const ins=insets(), Wd=innerWidth, Hd=innerHeight, top=ins.t, pad16=Math.max(16,Wd*.04);
   const g1=ctx.createLinearGradient(0,0,0,top+80); g1.addColorStop(0,"rgba(0,0,0,.85)"); g1.addColorStop(1,"rgba(0,0,0,0)"); ctx.fillStyle=g1; ctx.fillRect(0,0,Wd,top+80);
@@ -434,19 +498,43 @@ function render(){
   gauge(ctx,pad16+gr,by,gr,ch,"LIDAR",ch>=1?"RDY":Math.round(Math.max(0,ch)*100)+"%",false);
   const hdg=((S.a*180/Math.PI+90)%360+360)%360;
   gauge(ctx,Wd-pad16-gr,by,gr,hdg/360,"HEADING",String(Math.round(hdg)).padStart(3,"0")+"°",false);
-  timeline(ctx,pad16+gr*2+34,Wd-pad16-gr*2-34,by,S.t/RUN);
+  timeline(ctx,pad16+gr*2+34,Wd-pad16-gr*2-34,by,S.t/RUN,S.plan.phases);
   // pad bearing once seen
   if(S.wormSeen && !S.end){ const px=(W.worm.x-c.cx)*VS, py=(W.worm.y-c.cy)*VS;
     if(px<0||py<0||px>Wd||py>Hd){ const ax=Wd/2,ay=Hd/2,a=Math.atan2(py-ay,px-ax), RR=Math.min(Wd,Hd)/2-58, qx=ax+Math.cos(a)*RR, qy=ay+Math.sin(a)*RR;
       ctx.save(); ctx.translate(qx,qy); ctx.rotate(a); ctx.strokeStyle=K.plume; ctx.fillStyle="rgba(255,122,47,.15)"; ctx.lineWidth=1.6; ctx.shadowColor=K.plume; ctx.shadowBlur=10;
       ctx.beginPath(); ctx.moveTo(12,0); ctx.lineTo(-6,-8); ctx.lineTo(-2,0); ctx.lineTo(-6,8); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
       txt(ctx,"PAD",qx-Math.cos(a)*22,qy-Math.sin(a)*22+4,{size:9,weight:600,track:2,align:"center",color:K.plume}); } }
-  if(S.t<4 && !S.end) txt(ctx,"TAP TO SCAN",Wd/2,Hd*.64,{size:13,weight:600,track:5,align:"center",alpha:1-S.t/4});
+  // phase banner + telemetry glitch on each shift
+  const bage=S.t-S.shiftT;
+  if(mode==="play" && !S.end && S.phase>=0 && bage<2.4){
+    const P=PHASES[S.plan.phases[S.phase]], al=Math.min(1,bage*6,(2.4-bage)/.5);
+    if(S.phase>0 && bage<.35){ ctx.setTransform(1,0,0,1,0,0);
+      for(let i=0;i<12;i++){ const h=(3+Math.random()*16)*DPR, yy=Math.random()*(cv.height-h), dx=(Math.random()-.5)*36*DPR; ctx.drawImage(cv,0,yy,cv.width,h,dx,yy,cv.width,h); }
+      ctx.setTransform(DPR,0,0,DPR,0,0); }
+    const bs=Math.min(30,Wd*.07);
+    txt(ctx,(S.phase?"PHASE "+(S.phase+1)+" · ":"")+windowLabel(S.win),Wd/2,Hd*.3-bs-8,{mono:true,size:11,align:"center",color:K.steel,alpha:al});
+    txt(ctx,P.name,Wd/2,Hd*.3,{size:bs,weight:300,track:bs*.18,align:"center",color:P.col,alpha:al});
+    txt(ctx,P.sub,Wd/2,Hd*.3+22,{size:11,weight:600,track:3.5,align:"center",color:K.hull,alpha:al});
+  }
+  if(mode==="countdown"){
+    const left=Math.max(0,Math.ceil((S.launchAt-Date.now())/1000));
+    txt(ctx,"LAUNCH WINDOW "+windowLabel(S.win),Wd/2,Hd*.28,{size:10,weight:600,track:4,align:"center",color:K.steel});
+    txt(ctx,"T−"+String(left).padStart(2,"0"),Wd/2,Hd*.28+56,{mono:true,size:52,align:"center",color:left<=3?K.plume:K.hull});
+    const names=S.plan.phases.map(k=>PHASES[k]), gap=Math.min(86,(Wd-40)/4);
+    names.forEach((P,i)=>txt(ctx,P.short,Wd/2+(i-1.5)*gap,Hd*.28+86,{size:10,weight:600,track:2.5,align:"center",color:P.col}));
+    txt(ctx,"MISSION PLAN · 15 S EACH",Wd/2,Hd*.28+104,{size:9,weight:600,track:3,align:"center",color:K.steel});
+  }
 }
 
 function frame(ts){
   const dt=Math.min(0.05,(ts-last)/1000||0); last=ts; tNow+=dt;
-  if(mode==="play")update(dt); else if(S&&S.end)update(dt);
+  if(mode==="countdown"){
+    const left=Math.ceil((S.launchAt-Date.now())/1000);
+    if(left<=3 && left>0 && left!==S.cdLast){ S.cdLast=left; beep(660,660,.08,"square",.04); if(left===3) engineOn(); }
+    if(Date.now()>=S.launchAt){ mode="play"; engineOn(); beep(330,990,.3,"triangle",.07); buzz(25); }
+  }
+  else if(mode==="play")update(dt); else if(S&&S.end)update(dt);
   else if(S && mode==="title"){ S.t=tNow; S.x=WW/2+260*Math.sin(tNow*.2); S.y=WH-500+180*Math.sin(tNow*.15); S.a=Math.atan2(180*.15*Math.cos(tNow*.15),260*.2*Math.cos(tNow*.2)); S.pingReady=0; }
   render(); requestAnimationFrame(frame);
 }
@@ -460,7 +548,9 @@ $("startBtn").addEventListener("click",()=>{
   $("initErr").textContent=""; store.set("sp_initials",v); start();
 });
 $("againBtn").addEventListener("click",start);
-function start(){ audioInit(); beep(220,440,.2,"triangle",.06); newRun(); engineOn(); mode="play"; show(null); }
+function start(){ audioInit(); beep(220,440,.2,"triangle",.06); const w=nextWindow(); newRun(w); S.launchAt=w*WINDOW_MS; mode="countdown"; show(null); }
+function tickWindowLine(){ if(mode==="title"||mode==="over"){ const s=Math.ceil((nextWindow()*WINDOW_MS-Date.now())/1000); $("windowLine").textContent="NEXT LAUNCH WINDOW "+windowLabel(nextWindow())+" · T−"+String(s).padStart(2,"0"); } }
+setInterval(tickWindowLine,250);
 
 let shareStr="";
 function showOver(){
@@ -470,7 +560,7 @@ function showOver(){
   $("overTitle").textContent = esc?"Landed":(k==="time"?"Out of time":"Mission lost");
   $("overMsg").textContent = esc
     ? `${S.stars} ice core${S.stars===1?"":"s"} recovered${S.gold?" plus the anomaly":""}, ${Math.ceil(RUN-S.end.t)} s to spare.`
-    : (k==="time"?"Find the landing pad before the clock hits zero.":(k==="lurker"?"A dust devil caught the lander. Unbanked ice is lost.":"The lander hit a boulder. Unbanked ice is lost."));
+    : (k==="time"?"Find the landing pad before the clock hits zero.":(k==="lurker"?"A dust devil caught the lander. Unbanked ice is lost.":(k==="meteor"?"A meteor hit the lander. Unbanked ice is lost.":"The lander hit a boulder. Unbanked ice is lost.")));
   $("overScore").textContent=S.final;
   const prev=localBest(), best=Math.max(prev,S.final); store.set("sp_best_"+today,String(best));
   $("overBest").textContent = S.final>prev && S.final>0 ? "New personal best today." : "Your best today: "+best;
